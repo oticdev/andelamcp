@@ -1,0 +1,107 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - "main"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - staging
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync --frozen
+      - run: uv run pytest --ignore=tests/evals
+
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    needs: test
+
+    permissions:
+      contents: read
+      id-token: write  # required for Workload Identity Federation
+
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: us-central1
+      REPOSITORY_ID: andela-mcp
+      IMAGE_NAME: fastapi-api
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # One-time prerequisite per project:
+      # 1. Create a GCS bucket for Terraform state and add its name as a repo variable TF_STATE_BUCKET
+      # 2. Create a Workload Identity Pool + Provider and add the full provider resource name
+      #    as secret GCP_WORKLOAD_IDENTITY_PROVIDER
+      # 3. Create a service account with roles: Cloud Run Admin, Artifact Registry Writer,
+      #    Secret Manager Admin, Service Account User, Storage Object Admin (for TF state)
+      #    and add its email as secret GCP_SERVICE_ACCOUNT
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Ensure Artifact Registry repo exists before the first build.
+      # On subsequent runs this is a no-op.
+      - name: Ensure Artifact Registry repository exists
+        run: |
+          gcloud artifacts repositories describe $REPOSITORY_ID \
+            --location=$REGION --project=$PROJECT_ID 2>/dev/null || \
+          gcloud artifacts repositories create $REPOSITORY_ID \
+            --repository-format=docker \
+            --location=$REGION \
+            --project=$PROJECT_ID
+
+      - name: Build and push Docker image
+        run: |
+          gcloud builds submit \
+            --tag $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_ID/$IMAGE_NAME:$IMAGE_TAG
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Select Terraform workspace
+        working-directory: terraform
+        run: |
+          terraform workspace select ${{ inputs.environment }} || \
+          terraform workspace new ${{ inputs.environment }}
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="project_id=$PROJECT_ID" \
+            -var="region=$REGION" \
+            -var="repository_id=$REPOSITORY_ID" \
+            -var="image_name=$IMAGE_NAME" \
+            -var="image_tag=$IMAGE_TAG" \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}" \
+            -var="backend_cors_origins=${{ vars.BACKEND_CORS_ORIGINS }}" \
+            -var="log_level=${{ inputs.environment == 'dev' && 'debug' || vars.LOG_LEVEL || 'info' }}"

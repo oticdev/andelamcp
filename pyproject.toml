@@ -1,0 +1,30 @@
+[project]
+name = "andelamcp"
+version = "0.1.0"
+description = "Andela MCP Project"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.136.1",
+    "gunicorn>=25.3.0",
+    "httpx>=0.28.1",
+    "openai>=1.75.0",
+    "pydantic-settings>=2.14.0",
+    "uvicorn>=0.46.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.25.0",
+    "pytest-mock>=3.14.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+markers = [
+    "eval: behavioral LLM evals (require OPENAI_API_KEY, slow)",
+    "integration: integration tests requiring external services",
+]
