@@ -79,8 +79,9 @@ resource "google_artifact_registry_repository" "app" {
 }
 
 resource "google_cloud_run_v2_service" "api" {
-  name     = local.service_name
-  location = var.region
+  name                = local.service_name
+  location            = var.region
+  deletion_protection = false
 
   template {
     service_account = google_service_account.cloud_run_sa.email
