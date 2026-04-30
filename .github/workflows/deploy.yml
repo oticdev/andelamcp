@@ -1,6 +1,9 @@
 name: Deploy
 
 on:
+  push:
+    branches:
+      - "main"
   workflow_dispatch:
     inputs:
       environment:
@@ -10,7 +13,6 @@ on:
         type: choice
         options:
           - dev
-          - test
           - staging
 
 jobs:
