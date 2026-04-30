@@ -1,0 +1,6 @@
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+
+repository_id = "andela-mcp"
+image_name    = "fastapi-api"
+image_tag     = "latest"
